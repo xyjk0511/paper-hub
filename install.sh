@@ -74,16 +74,31 @@ done
 echo
 echo "完成。自检英文检测器："
 P=""
-for c in python3 python; do
-  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then P=$c; break; fi
+# 优先新版本：slop-guard 需要 3.9+ 和 typing_extensions；macOS 自带的 python3 常是 3.9
+for c in python3.14 python3.13 python3.12 python3.11 python3.10 python3 python; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then P=$c; break; fi
 done
+selftest() { # selftest 名称 期望文本 脚本路径；先收全输出再判断，避免管道提前关闭造成误报
+  local out
+  out=$(PYTHONIOENCODING=utf-8 "$P" "$3" "$TMP/t.txt" 2>&1) || true
+  case "$out" in
+    *"$2"*) echo "  $1 正常" ;;
+    *) echo "  $1 失败（$P）。报错末尾："; printf '%s
+' "$out" | tail -n 3 | sed 's/^/    /' ;;
+  esac
+}
 if [ -n "$P" ]; then
+  echo "  使用 $P（$("$P" -c 'import sys; print(sys.version.split()[0])')）"
   printf 'This is a short test sentence. It delves into a rich tapestry of ideas.
 ' > "$TMP/t.txt"
-  # 检测器发现问题时退出码可能非 0，所以按输出判断
-  PYTHONIOENCODING=utf-8 "$P" "${targets[0]}/paper-hub/tools/slop-guard/sg.py" "$TMP/t.txt" 2>&1 | grep -q '/100'     && echo "  slop-guard 正常" || echo "  slop-guard 失败：先运行 $P -m pip install typing_extensions 再试"
-  PYTHONIOENCODING=utf-8 "$P" "${targets[0]}/sloptrim/scripts/detect.py" "$TMP/t.txt" 2>&1 | grep -q 'ai_vocabulary'     && echo "  sloptrim 正常" || echo "  sloptrim 失败：看 ${targets[0]}/sloptrim/SKILL.md 的依赖说明"
+  "$P" -c 'import typing_extensions' >/dev/null 2>&1 || echo "  提示：slop-guard 需要 typing_extensions，可运行 $P -m pip install --user typing_extensions"
+  selftest slop-guard '/100' "${targets[0]}/paper-hub/tools/slop-guard/sg.py"
+  if [ -f "${targets[0]}/sloptrim/scripts/detect.py" ]; then
+    selftest sloptrim 'ai_vocabulary' "${targets[0]}/sloptrim/scripts/detect.py"
+  else
+    echo "  跳过 sloptrim 自检：${targets[0]}/sloptrim 是之前就有的版本，没有 scripts/detect.py"
+  fi
 else
-  echo "  没找到可用的 Python 3，两个英文检测器暂时用不了。"
+  echo "  没找到 Python 3.9 以上版本，两个英文检测器暂时用不了。"
 fi
 echo "重开 Claude Code / Codex 会话后生效。"
